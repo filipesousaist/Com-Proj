@@ -6,5 +6,5 @@ semi commented line $$not supposed to appear
 semi commented line 2 $not supposed to appear$
 $weird characters$ $+´~-.!"#%&/()$
 multiline $ start
-end $ comment (multiline comment is supposed to appear in one line)
+end $comment (multiline comment is supposed to appear in one line)
 $$ EOF

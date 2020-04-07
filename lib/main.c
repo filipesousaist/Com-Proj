@@ -9,6 +9,7 @@
 
 char *ext = ".asm", *prog, *infile = "<<stdin>>", *outfile = "out.asm";
 int errors, trace, initial, yyparse(void);
+void yystart(void);
 extern FILE *yyout;
 
 int yyerror(char *s)
@@ -85,6 +86,7 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  yystart();
   if (yyparse() != 0 || errors > 0) {
     fprintf(stderr, "%d errors in %s\n", errors, infile);
     fclose(yyout);
