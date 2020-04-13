@@ -1,10 +1,3 @@
-program
-abc$$ def
-$$ commented line $comment inside comment $
-non commented $trash$ line
-semi commented line $$not supposed to appear
-semi commented line 2 $not supposed to appear$
-$weird characters$ $+´~-.!"#%&/()$
-multiline $ start
-end $comment (multiline comment is supposed to appear in one line)
-$$ EOF
+program start	
+	"He" 0x6C '\6c' "o" 054 32 "wor\6C\64" '!' !
+end

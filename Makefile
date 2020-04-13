@@ -11,4 +11,5 @@ $(TARGET): gram.y scan.l
 
 clean:
 	make -C $(LIB) clean
-	rm -f *.o lex.yy.c y.tab.c y.tab.h y.output $(TARGET)
+	rm -f *.o lex.yy.c y.tab.c y.tab.h y.output out.asm $(TARGET)
+

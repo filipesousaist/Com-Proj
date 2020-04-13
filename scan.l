@@ -87,7 +87,7 @@ return                                      return RETURN;
 <CHAR>\\\\                                  yylval.i = '\\';
 <CHAR>\\\'                                  yylval.i = '\'';
 <CHAR>\\{HEX}{HEX}?                         yylval.i = (char) strtol(yytext + 1, 0, 16);
-<CHAR>\'                                    BEGIN INITIAL; return NUMLIT;
+<CHAR>\'                                    BEGIN INITIAL; return CHRLIT;
 
 <TEXT,CHAR>.|\n                             yyerror("unexpected character");
  
