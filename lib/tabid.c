@@ -153,7 +153,7 @@ int IDsearch(char *s, void **attrib, int skip, int lev) {
       return aux->type;
     } else
       if (aux->name == 0 && lev > 0 && --lev == 0)
-	break; /* stop after 'lev' levels */
+	      break; /* stop after 'lev' levels */
   if (attrib != ((void**)IDtest)) {
     sprintf(buf, "%s: undefined.", s);
     yyerror(buf);
