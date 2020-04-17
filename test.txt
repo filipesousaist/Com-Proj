@@ -1,3 +1,0 @@
-program start	
-	"He" 0x6C '\6c' "o" 054 32 "wor\6C\64" '!' !
-end

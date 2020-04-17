@@ -18,16 +18,9 @@ int errors;
 #define F_INTLIT  0b010000
 #define F_ZERO    0b100000
 
-typedef union {
-	int n;      /* number */
-	char* s;    /* string */
-	Node* a;    /* array */
-} Value;
-
 typedef struct { 
 	int type;
 	char* name;
-	Value value;
 	char flags;
 } Variable;
 
@@ -333,23 +326,14 @@ void declareVar(Node* varNode, Node* typeNode, char* id, int size) {
 void initValue(Node* initNode, int type, Node* valueNode) {
 	initNode->info = type;
 
-	Value* val = (Value*) malloc(sizeof(Value));	
 	switch (type) {
-		case NUMBER:
-			val->n = valueNode->value.i; break;
-		case STRING:
-			val->s = strdup(valueNode->value.s); break;
-		case ARRAY:
-			val->a = valueNode; break;
+		case NUMBER: case ARRAY:
+			initNode->user = (void*) valueNode; break;
 	}
-	
-	initNode->user = (void*) val;
 }
 
 void createVar(Node* qualNode, Node* constNode, Node* varNode, Node* initNode) {
 	Variable* var = (Variable*) varNode->user;
-	Value value = *((Value*) initNode->user);
-	var->value = value;
 	
 	char repeated = 0;	
 
@@ -379,20 +363,22 @@ void createVar(Node* qualNode, Node* constNode, Node* varNode, Node* initNode) {
 
 	/* Convert single number into array if needed */
 	if (initNode->info == NUMBER && var->type == ARRAY) {
-		Node* intNode = initNode->CHILD(0);
-		Node* arrayNode = binNode(',', nilNode(NIL), intNode);
+		Node* arrayNode = binNode(',', nilNode(NIL), (Node*) initNode->user);
 		arrayNode->info = 1;
 		
-		value.a = initNode->CHILD(0) = arrayNode;
+		removeNode(initNode, 0);
+		addNode(initNode, arrayNode, 0);
+		initNode->user = arrayNode;
 		initNode->info = ARRAY;
 	}
 
 	if (initNode->info != NIL && var->type != initNode->info)
 		yyerror("Invalid initializer type");
-	else if (initNode->info == ARRAY) { /* */
+	else if (initNode->info == ARRAY) {
+		Node* arrayNode = (Node*) initNode->user;
 		if (varNode->info == -1) 
 			yyerror("Cannot initialize array without declaring size");
-		else if (varNode->info < value.a->info) 
+		else if (varNode->info < arrayNode->info) 
 			yyerror("Array initializer has more elements than declared size");
 	}
 
@@ -404,7 +390,6 @@ void createVar(Node* qualNode, Node* constNode, Node* varNode, Node* initNode) {
 		yyerror("Forward variable can't be initialized");
 	
 	if (repeated) {
-		free(initNode->user);
 		free(var);	
 	}
 	else {
