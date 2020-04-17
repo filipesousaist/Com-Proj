@@ -34,6 +34,7 @@ typedef struct {
 static long ifDepth = 0;
 static long forDepth = 0;
 static char* fName; /* 0 -> Outside function, "" -> main function */
+static char errBuf[256];
 
 %}
 
@@ -187,14 +188,14 @@ instrs		: instrs instr						{ $$ = binNode(INSTR, $1, $2); }
 instr		: IF										{ ifDepth ++; }
 			  expr THEN block elifs else FI				{ $$ = quadNode(IF, $3, $5, $6, $7); 
 														  ifDepth --; if ($3->info == NIL) 
-															  yyerror("Invalid type for 'if' test expression"); }	
+															  yyerror("Invalid type (NIL) for 'if' test expression"); }	
 			| FOR										{ forDepth ++; }
 			  expr UNTIL expr STEP expr DO block DONE	{ $$ = quadNode(FOR, $3, $5, $7, $9); 
 														  forDepth --; if ($5->info == NIL)
-															  yyerror("Invalid type for 'until' test expression"); }
+															  yyerror("Invalid type (NIL) for 'until' test expression"); }
 			| expr ';'									{ $$ = uniNode(';', $1); }
 			| expr '!'									{ $$ = uniNode('!', $1); if ($1->info == NIL) 
-															  yyerror("Can only print number, string or array"); }
+															  yyerror("Can only print number, string or array. Got NIL"); }
 			| lval '#' expr ';'     					{ $$ = binNode('#', $1, $3); handleAlloc($1, $3); }
 			| IF error FI						{ yyerrok; $$ = quadNode(IF, nilNode(ERR),
 													nilNode(ERR), nilNode(ERR), nilNode(ERR)); }
@@ -214,7 +215,7 @@ endinstr	: REPEAT							{ $$ = nilNode(REPEAT);
 			;
 
 elifs		: elifs ELIF expr THEN block	{ $$ = triNode(ELIF, $1, $3, $5); if ($3->info == NIL)
-												  yyerror("Invalid type for 'elif' test expression"); }
+												  yyerror("Invalid type (NIL) for 'elif' test expression"); }
 			| /**/							{ $$ = nilNode(NIL); }
 			;
 
@@ -259,6 +260,14 @@ expr		: lval
 			| lval ASSIGN expr				{ $$ = binNode(ASSIGN, $1, $3); handleBinOp(ASSIGN, $$, $1, $3); }
 			;
 %%
+
+void yyerrorf(const char format[], int n, ...) {
+	va_list va;
+	va_start(va, n);
+	vsprintf(errBuf, format, va);
+	yyerror(errBuf);
+	va_end(va);
+}
 
 char* newChar(char c) {
 	char* new = (char*) malloc(sizeof(char));
@@ -315,7 +324,7 @@ void declareVar(Node* varNode, Node* typeNode, char* id, int size) {
 	var->name = id;
 	if (size >= 0) {
 		if (type != ARRAY)
-			yyerror("Can't declare size for non-array variable");
+			yyerrorf("Can only declare size of array. Got: %s", 1, yyname[type]);
 		else if (size == 0)
 			yyerror("Array size can't be 0");
 	}
@@ -347,18 +356,19 @@ void createVar(Node* qualNode, Node* constNode, Node* varNode, Node* initNode) {
 		if (result == var->type) {
 			Variable* oldVar = (Variable*) data;
 			if (~oldVar->flags & F_FORWARD)
-				yyerror("Can't override non-forward variable");
+				yyerrorf("Can't override non-forward variable '%s'", 1, var->name);
 			else if (qualNode->info == FORWARD)
-				yyerror("Can't re-declare forward variable");
+				yyerrorf("Can't re-declare forward variable '%s'", 1, var->name);
 			else /* Non-forward overriding forward: OK */ {
 				oldVar->flags &= ~F_FORWARD;
 			}
 			
 			if (!(oldVar->flags & F_CONST) == (constNode->info == CONST))
-				yyerror("Forward and non-forward variable declarations differ on 'const' qualifier");
+				yyerrorf("Forward and non-forward declarations for variable '%s' differ on 'const' qualifier",
+					1, var->name);
 		}
 		else
-			yyerror("Already declared but with different type");
+			yyerrorf("'%s': Already declared but with different type", 1, var->name);
 	}
 
 	/* Convert single number into array if needed */
@@ -373,21 +383,23 @@ void createVar(Node* qualNode, Node* constNode, Node* varNode, Node* initNode) {
 	}
 
 	if (initNode->info != NIL && var->type != initNode->info)
-		yyerror("Invalid initializer type");
+		yyerrorf("Invalid initializer type: %s. Expected: %s", 
+			2, yyname[initNode->info], yyname[var->type]);
 	else if (initNode->info == ARRAY) {
 		Node* arrayNode = (Node*) initNode->user;
 		if (varNode->info == -1) 
 			yyerror("Cannot initialize array without declaring size");
 		else if (varNode->info < arrayNode->info) 
-			yyerror("Array initializer has more elements than declared size");
+			yyerrorf("Array initializer has more elements (%i) than declared size (%i)",
+				2, arrayNode->info, varNode->info);
 	}
 
 	if (initNode->info == NIL
      && constNode->info == CONST
 	 && qualNode->info != FORWARD)
-        yyerror("Constant non-forward variable must be initialized");
+        yyerrorf("Constant non-forward variable '%s' is not initialized", 1, var->name);
 	else if (initNode->info != NIL && qualNode->info == FORWARD)
-		yyerror("Forward variable can't be initialized");
+		yyerrorf("Forward variable '%s' can't be initialized", 1, var->name);
 	
 	if (repeated) {
 		free(var);	
@@ -434,7 +446,8 @@ Node* createFunction(Node* qualNode, Node* retNode, char* id, Node* paramsNode) 
 		f->numParams = 0;
 		f->paramTypes = 0;
 	}
-
+	
+	
 	char exists = 0;
     if (IDsearch(id, (void**) IDtest, 1, 0) == -1)
 		IDinsert(IDlevel() - 1, FUNCTION, id, (void*) f);
@@ -446,23 +459,24 @@ Node* createFunction(Node* qualNode, Node* retNode, char* id, Node* paramsNode) 
         if (result == FUNCTION) {
             Function* oldF = (Function*) data;
             if (~oldF->flags & F_FORWARD)
-                yyerror("Can't override non-forward function");
+                yyerrorf("Can't override non-forward function '%s'", 1, id);
             else if (qualNode->info == FORWARD)
-                yyerror("Can't re-declare forward function");
+                yyerrorf("Can't re-declare forward function '%s'", 1, id);
             else /* Non-forward overriding forward: OK */ {
                 oldF->flags &= ~F_FORWARD;
             }
 
 			if (f->retType != oldF->retType)
-				yyerror("Function return type does not match with previous declaration");
+				yyerrorf("Return type for function '%s' does not match with previous declaration", 1, id);
 			if (f->numParams != oldF->numParams)
-				yyerror("Number of function parameters doesn't match with previous declaration");
+				yyerrorf("Number of parameters for function '%s' doesn't match with previous declaration", 1, id);
 			else for (int i = 0; i < f->numParams; i ++)
 				if (f->paramTypes[i] != oldF->paramTypes[i])
-					yyerror("Function parameter type does not match with previous declaration");
+					yyerrorf("Type of parameter %i for function '%s' does not match with previous declaration",
+						2, i + 1, id);
         }
         else
-            yyerror("Already declared but with different type");
+            yyerrorf("'%s': Already declared but with different type (%s)", 2, id, yyname[result]);
 		
     }
 
@@ -477,9 +491,9 @@ void addFuncImpl(Node* implNode) {
 	Function* f;
 	IDfind(fName, (void**) &f);
 	if (~f->flags & F_FORWARD && implNode->info == DONE)
-		yyerror("Non-forward function must have a body");
+		yyerrorf("Non-forward function '%s' must have a body", 1, fName);
 	else if (f->flags & F_FORWARD && implNode->info == DO)
-		yyerror("Forward function can't have a body");
+		yyerrorf("Forward function '%s' can't have a body", 1, fName);
 	fName = 0;
 }
 
@@ -491,7 +505,8 @@ void handleCall(Node* callNode, char* id, Node* argsNode) {
 		Function* f = (Function*) data;
 		
 		if (f->numParams != argsNode->info)
-			yyerror("Wrong number of arguments");
+			yyerrorf("Wrong number of arguments: %i. Expected: %i", 
+				2, argsNode->info, f->numParams);
 		
 		else {
 			int* argTypes = (int*) argsNode->user;
@@ -499,7 +514,8 @@ void handleCall(Node* callNode, char* id, Node* argsNode) {
 			for (int i = 0; i < f->numParams; i ++)
 				if (f->paramTypes[i] != argTypes[i]) {
 					correctArgs = 0;
-					yyerror("Wrong argument type");
+					yyerrorf("Wrong type for argument %i of function '%s': %s. Expected: %s",
+						4, i + 1, id, yyname[argTypes[i]], yyname[f->paramTypes[i]]);
 				}
 			if (correctArgs) {
 				callNode->info = f->retType;
@@ -508,8 +524,9 @@ void handleCall(Node* callNode, char* id, Node* argsNode) {
 		}
 	}
 	else if (result != -1)
-		yyerror("Can only call function");
+		yyerrorf("'%s' of type %s is not callable", 2, id, yyname[result]);
 	
+	free(argsNode->user);
 	callNode->info = NIL;
 }
 
@@ -539,12 +556,13 @@ void handleReturn(int type) {
 	}
 	else { /* Main function */
 		if (!ifDepth && !forDepth)
-			yyerror("Return outside block in main function");
+			yyerror("Return outside any block in main function");
 		fType = NUMBER;
 	}
 	
 	if (fType != type)
-		yyerror("Wrong function return type");
+		yyerrorf("Wrong function return type: %s. Expected: %s",
+			2, yyname[type], yyname[fType]);
 }
 
 void handleIndex(Node* idxNode, char* id, Node* expr) {
@@ -552,17 +570,18 @@ void handleIndex(Node* idxNode, char* id, Node* expr) {
 	int result = IDfind(id, &data);
 	
 	if (result == NUMBER) {
-		yyerror("Can only index string or array");
+		yyerror("Can only index string or array. Got: NUMBER");
 		result = -1;
 	}
 	else if (result == FUNCTION) {
 		Function* f = (Function*) data;
 		if (f->numParams > 0) {
-			yyerror("Wrong number of parameters on function call");
+			yyerrorf("Wrong number of parameters on function call: %i. Expected: 0",
+				1, f->numParams);
 			result = -1;
 		}
 		if (!stringOrArray(f->retType)) {
-			yyerror("Can only index string or array");
+			yyerrorf("Can only index string or array. Got: %s", 1, f->retType);
 			result = -1;
 		}
 		idxNode->user = (void*) newChar(F_FUNC);
@@ -570,7 +589,7 @@ void handleIndex(Node* idxNode, char* id, Node* expr) {
 
 
 	if (expr->info != NUMBER)
-		yyerror("Can't access non-number index");
+		yyerrorf("Can't access index of type %s. Expected: NUMBER", 1, yyname[expr->info]);
 
 	idxNode->info = result == -1 ? NIL : NUMBER;
 }
@@ -602,7 +621,8 @@ void handleUnOp(int type, Node* result, Node* n) {
 			else if (n->info == NUMBER)
 				result->info = ARRAY;
 			else {
-				yyerror("Can only extract address of number");
+				yyerrorf("Can only extract address of number. Got: %s",
+					1, yyname[n->info]);
 				result->info = NIL;
 			}
 			break;
@@ -610,7 +630,8 @@ void handleUnOp(int type, Node* result, Node* n) {
 			if (n->info == NUMBER)
 				result->info = NUMBER;
 			else {
-				yyerror("Operation only possible for numbers");
+				yyerrorf("%c: Operation only possible for numbers. Got: %s",
+					2, (char) type, yyname[n->info]);
 				result->info = NIL;
 			}
 			break;
@@ -623,7 +644,8 @@ void handleBinOp(int type, Node* result, Node* l, Node* r) {
 			if (l->info == NUMBER && r->info == NUMBER)
 				result->info = NUMBER;
 			else {
-				yyerror("Operation only possible for numbers");
+				yyerrorf("%c: Operation only possible for numbers. Got: %s, %s",
+					3, (char) type, yyname[l->info], yyname[r->info]);
 				result->info = NIL;
 			}
 			break;
@@ -640,8 +662,12 @@ void handleBinOp(int type, Node* result, Node* l, Node* r) {
 				  || l->info == ARRAY && r->info == NUMBER)
 				result->info = ARRAY;
 			else {
-				type == '+' ? yyerror("Operation only possible for two numbers or a number and an array")
-				  /* '-' */	: yyerror("Each operator must be number or array");
+				type == '+' ? yyerrorf(
+					"+: Operation only possible for two numbers or a number and an array. Got: %s, %s",
+						2, yyname[l->info], yyname[r->info])
+				  			: yyerrorf(
+					"-: Each operator must be number or array. Got: %s, %s",
+						2, yyname[l->info], yyname[r->info]);
 				result->info = NIL;
 			}
 			break;
@@ -649,7 +675,8 @@ void handleBinOp(int type, Node* result, Node* l, Node* r) {
 			if ((l->info == NUMBER || l->info == STRING) && l->info == r->info)
 				result->info = NUMBER;
 			else {
-				yyerror("Operation only possible for two numbers or two strings");
+				yyerrorf("%s: Operation only possible for two numbers or two strings. Got: %s, %s",
+					3, yyname[type], yyname[l->info], yyname[r->info]);
 				result->info = NIL;
 			}
 			break;
@@ -668,7 +695,8 @@ void handleBinOp(int type, Node* result, Node* l, Node* r) {
 					}
 				}
 				if (l->info != r->info) {
-					yyerror("Can't assign different types");
+					yyerrorf("Can't assign different types (%s and %s)",
+						2, yyname[l->info], yyname[r->info]);
 					result->info = NIL;
 				}
 				else 
@@ -680,9 +708,11 @@ void handleBinOp(int type, Node* result, Node* l, Node* r) {
 
 void handleAlloc(Node* lvNode, Node* sizeNode) {
 	if (sizeNode->info != NUMBER)
-		yyerror("Allocation size must be a number");
+		yyerrorf("Allocation size must be a number. Got: %s",
+			1, yyname[sizeNode->info]);
 	if (!stringOrArray(lvNode->info))
-		yyerror("Can only allocate memory for string or array");
+		yyerrorf("Can only allocate memory for string or array. Got: %s",
+			1, yyname[lvNode->info]);
 }
 
 char **yynames =
