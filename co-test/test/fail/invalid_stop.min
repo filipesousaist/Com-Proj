@@ -1,0 +1,6 @@
+program
+start
+if 0 = 0 then
+stop
+fi
+end

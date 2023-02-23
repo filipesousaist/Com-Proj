@@ -1,0 +1,5 @@
+# 97 is a number
+# 97 10 is the string 'a\n'
+program start
+    97 ! 97 10 !
+end

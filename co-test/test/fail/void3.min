@@ -1,0 +1,7 @@
+program
+    function void hello do 123!
+start
+    if hello > 123 then
+        123 !
+    fi
+end

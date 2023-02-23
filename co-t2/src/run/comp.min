@@ -1,0 +1,4 @@
+module
+    function public number exemplo number n do
+        return n >= 6
+end

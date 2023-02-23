@@ -1,0 +1,5 @@
+program
+    number x
+start
+    x[0] := 1;
+end

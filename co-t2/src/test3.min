@@ -1,0 +1,9 @@
+program start
+    assert 4>3;
+
+    "OK\n"!
+
+    assert 1=0;
+    
+    "NOK\n"!
+end

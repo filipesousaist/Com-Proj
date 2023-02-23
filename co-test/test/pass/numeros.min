@@ -1,0 +1,13 @@
+program
+number decimal;
+number binario;
+number octal;
+number zero;
+number hexadec
+start
+  decimal := 10;
+  binario := 0b10;
+  octal   := 010;
+  zero    := 0;
+  hexadec := 0x10;
+end

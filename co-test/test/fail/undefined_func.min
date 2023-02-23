@@ -1,0 +1,6 @@
+program
+    function void a do b;
+    ;
+    function void b do 1!
+start a;
+end

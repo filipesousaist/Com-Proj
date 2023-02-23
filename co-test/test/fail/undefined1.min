@@ -1,0 +1,4 @@
+program
+start
+    a := 1;
+end

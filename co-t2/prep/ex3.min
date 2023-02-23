@@ -1,0 +1,17 @@
+program start
+	number i; number j;
+	i := j := 0;
+	while i < 4 do
+		i! "\n"! i := i + 1;
+	done
+	
+	for i := 0 until i = 10 step i := i + 1 do
+		"i: "! i!
+		j := 3;
+		while j > 0 do
+			" "! 10 + j!
+			j := j - 1;
+		done
+		"\n"!
+	done
+end

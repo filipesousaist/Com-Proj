@@ -1,0 +1,8 @@
+program
+    number i := 2;
+    function void f number i do i+1!
+start
+    number i;
+    i := 0;
+    f(i); $$ Should print 1
+end

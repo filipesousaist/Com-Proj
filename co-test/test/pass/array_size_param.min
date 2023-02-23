@@ -1,0 +1,7 @@
+program
+    array myArr[1] := 34;
+    function void print_arr1 array arr[1] do    $ Note: Array size in function  $
+        arr[0]!                                 $ parameter is unnecessary      $
+start
+    print_arr1(myArr);
+end

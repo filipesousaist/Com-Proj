@@ -1,0 +1,17 @@
+program
+    number max_bin := 0b01111111111111111111111111111111;
+    number max_oct := 017777777777;
+    number max_dec := 2147483647;
+    number max_hex := 0x7fffffff;
+    number min
+start
+    max_bin ! "\n" !        $$ Should print 2147483647
+
+    max_bin = max_oct &
+    max_bin = max_dec &
+    max_bin = max_hex !     $$ Should be true, so it should print a nonzero value
+
+    "\n" !
+
+    min := -max_bin - 1 !   $$ Should print -2147483648
+end

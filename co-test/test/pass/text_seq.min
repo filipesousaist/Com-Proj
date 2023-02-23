@@ -1,0 +1,24 @@
+program
+    string s := "Hello," 32 'w' 'o' 'r' 'l' 'd' 33 '\n'
+start
+    s!
+    s := "a";
+    s := "\"";
+    s := " ";
+    s := "";
+    s := "\\";
+    s := "'";
+    s := "\n";
+    s := "\r";
+    s := "\t";
+    s := "\0";
+    s := "\e";
+    s := "\0c";
+    s := "\F8";
+
+    s := "\fg\a0c"; $$ Same as:
+                    $$ s := '\f' 'g' '\a0' 'c'
+    
+    s := "\ff\a0c"; $$ Same as:
+                    $$ s := '\ff' '\a0' 'c'
+end

@@ -1,0 +1,4 @@
+program
+    string s := 0
+start
+end

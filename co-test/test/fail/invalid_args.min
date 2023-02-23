@@ -1,0 +1,6 @@
+program
+    function number add number x; number y do
+        return x + y
+start
+    add("1", "2");
+end

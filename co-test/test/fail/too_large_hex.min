@@ -1,0 +1,4 @@
+program 
+    number x := 0x80000000 $$ 2^31
+start
+end

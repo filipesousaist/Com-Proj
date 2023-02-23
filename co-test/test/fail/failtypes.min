@@ -1,0 +1,5 @@
+program
+    function forward void hello number x; number y done
+start
+    hello(2, "hello");
+end

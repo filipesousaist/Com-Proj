@@ -1,0 +1,757 @@
+%{
+/*
+ * selecção de instruções com postfix
+ */
+#include <stdio.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+#include "node.h"
+#include "postfix.h"
+#include "y.tab.h"
+#include "lib/tabid.h"
+#include "minor.h"
+
+#define ASM(x, ...) fprintf(yyout, x, ##__VA_ARGS__)
+
+#ifndef U_
+#define U_ "_"
+#endif
+
+#define TRACE
+static void yytrace(NODEPTR_TYPE p, int eruleno, int cost, int bestcost);
+
+extern FILE *yyout;
+extern char **yynames;
+
+int lbl;
+static char *mklbl(int n) {
+	static char buf[20];
+	sprintf(buf, "%cL%d", n < 0 ? '.' : '_', n);
+	return strcpy(malloc(strlen(buf)+1),buf);
+}
+static char *mkfunc(char *s) {
+	static char buf[80];
+	strcpy(buf, "_");
+	strcat(buf, s);
+	return buf;
+}
+
+static void outstr(char *s) {
+  while (*s) fprintf(yyout, pfCHAR, (unsigned char)*s++);
+  fprintf(yyout, pfCHAR, 0);
+}
+
+#define LARGE_INT 32768
+
+char* fName;
+
+int currentArraySize;
+int* currentArray;
+
+int nForwardNames;
+char** forwardNames;
+
+int numLocalArrays;
+int* localArrays;
+
+int numForLabels;
+int* forLabels;
+int* forIncrLabels;
+int* forAfterLabels;
+
+int numWhileLabels;
+int* whileLabels;
+int* whileAfterLabels;
+
+typedef struct {
+	int retType;
+	char* name;
+	char flags;
+	int paramsSize;
+} Function;
+
+typedef struct {
+	int type;
+	char flags;
+	int offset;
+} Variable;
+
+#define IN_WHILE 0
+#define IN_FOR 1
+char inCycle;
+
+static int power(int base, int exponent) {
+	int result = 1;
+	while (exponent --) result *= base;
+	return result;
+}
+
+static void printExpr(Node* exprNode) {
+	switch(exprNode->info) {
+		case NUMBER:
+			ASM(pfEXTRN pfCALL pfTRASH, "_printi", "_printi", 4);
+			break;
+		case STRING:
+			ASM(pfEXTRN pfCALL pfTRASH, "_prints", "_prints", pfWORD);
+			break;
+	}
+}
+
+static int getSize(int type) {
+	return type == NUMBER ? 4 : pfWORD;
+}
+
+static void parseID(Node* idNode, char isIndexed) {
+	char* id = idNode->value.s;
+	void* data;
+	int result = IDfind(id, &data);
+
+	if (result == FUNCTION) { /* function with no arguments */
+		Function* func = (Function*) data;
+		ASM(pfCALL, mkfunc(idNode->value.s));
+		if (func->retType != NIL) /* does not return void */
+			ASM(pfPUSH);
+		if (isIndexed) ASM(pfLOAD);
+	}
+	else {
+		Variable* var = (Variable*) data;
+		if (isIndexed) {
+			if (var->flags & F_GLOBAL)
+				ASM(pfADDRV, id);
+			else
+				ASM(pfLOCV, var->offset);
+		}
+		else {
+			if (var->flags & F_GLOBAL)
+				ASM(pfADDR, id);
+			else
+				ASM(pfLOCAL, var->offset);
+		}
+		
+	}
+
+	
+}
+
+static void loadID(Node* idNode) {
+	char* id = idNode->value.s;
+	void* data;
+	int result = IDfind(id, &data);
+
+	if (result == FUNCTION) { /* function with no arguments */
+		Function* func = (Function*) data;
+		ASM(pfCALL, mkfunc(idNode->value.s));
+		if (func->retType != NIL) /* does not return void */
+			ASM(pfPUSH);
+	}
+	else {
+		Variable* var = (Variable*) data;
+				
+		if (var->flags & F_GLOBAL)
+			ASM(pfADDRV, id);
+		else
+			ASM(pfLOCV, var->offset);
+	}
+}
+
+static void storeID(Node* idNode) {
+	char* id = idNode->value.s;
+	void* data;
+	int result = IDfind(id, &data);
+
+	Variable* var = (Variable*) data;
+			
+	if (var->flags & F_GLOBAL)
+		ASM(pfADDRA, id);
+	else
+		ASM(pfLOCA, var->offset);
+}
+
+static void parseIndex(Node*p) {
+	char* name = LEFT_CHILD(p)->value.s;
+	void* data;
+	int result = IDfind(name, &data);
+
+	if (result == FUNCTION) {
+		Function* func = (Function*) data;
+		result = func->retType;
+	}
+	if (result == STRING)
+		ASM(pfADD);
+	else /* array */
+		ASM(pfIMM pfMUL pfADD, 4);
+}
+
+void storeIndex(Node* idNode) {
+	char* name = idNode->value.s;
+	void* data;
+	int result = IDfind(name, &data);
+
+	if (result == FUNCTION) {
+		Function* func = (Function*) data;
+		result = func->retType;
+	}
+
+	if (result == STRING)
+		ASM(pfSTCHR);
+	else /* array */
+		ASM(pfSTORE);
+}
+
+void loadIndex(Node* p) {
+	char* name = LEFT_CHILD(p)->value.s;
+	void* data;
+	int result = IDfind(name, &data);
+
+	if (result == FUNCTION) {
+		Function* func = (Function*) data;
+		result = func->retType;
+	}
+
+	if (result == STRING)
+		ASM(pfADD pfLDCHR);
+	else /* array */
+		ASM(pfIMM pfMUL pfADD pfLOAD, 4);
+}
+
+static void addLocalArray(int offset) {
+	if (numLocalArrays++ == 0)
+		localArrays = (int*) malloc(sizeof(int));
+	else
+		localArrays = (int*) realloc(localArrays, numLocalArrays * sizeof(int));
+	localArrays[numLocalArrays - 1] = offset;
+}
+
+static void resetLocalArrays() {
+	if (numLocalArrays > 0) 
+		free(localArrays);
+	numLocalArrays = 0;
+}
+
+static void initLocalArrays() {
+	for (int i = 0; i < numLocalArrays; i ++)
+		ASM(pfLOCAL pfLOCAL pfSTORE, localArrays[i] + 4, localArrays[i]);
+}
+
+static void pushForLabels(int forLabel, int forIncrLabel, int forAfterLabel) {
+	numForLabels ++;
+	if (forLabels == 0) {
+		forLabels = (int*) malloc(sizeof(int));
+		forIncrLabels = (int*) malloc(sizeof(int));
+		forAfterLabels = (int*) malloc(sizeof(int));
+	}
+	else {
+		forLabels = (int*) realloc(forLabels, numForLabels * sizeof(int));
+		forIncrLabels = (int*) realloc(forIncrLabels, numForLabels * sizeof(int));
+		forAfterLabels = (int*) realloc(forAfterLabels, numForLabels * sizeof(int));
+	}
+	forLabels[numForLabels - 1] = forLabel;
+	forIncrLabels[numForLabels - 1] = forIncrLabel;	
+	forAfterLabels[numForLabels - 1] = forAfterLabel;	
+}
+
+static void popForLabel() {
+	numForLabels --;
+}
+
+static char* forLabel() {
+	return mklbl(forLabels[numForLabels - 1]);
+}
+
+static char* forIncrLabel() {
+	return mklbl(forIncrLabels[numForLabels - 1]);
+}
+
+static char* forAfterLabel() {
+	return mklbl(forAfterLabels[numForLabels - 1]);
+}
+
+static void pushWhileLabels(int whileLabel, int whileAfterLabel) {
+	numWhileLabels ++;
+	if (whileLabels == 0) {
+		whileLabels = (int*) malloc(sizeof(int));
+		whileAfterLabels = (int*) malloc(sizeof(int));
+	}
+	else {
+		whileLabels = (int*) realloc(whileLabels, numWhileLabels * sizeof(int));
+		whileAfterLabels = (int*) realloc(whileAfterLabels, numWhileLabels * sizeof(int));
+	}
+	whileLabels[numWhileLabels - 1] = whileLabel;
+	whileAfterLabels[numWhileLabels - 1] = whileAfterLabel;	
+}
+
+static void popWhileLabel() {
+	numWhileLabels --;
+}
+
+static char* whileLabel() {
+	return mklbl(whileLabels[numWhileLabels - 1]);
+}
+
+static char* whileAfterLabel() {
+	return mklbl(whileAfterLabels[numWhileLabels - 1]);
+}
+
+static void addForward(char* name) {
+	nForwardNames ++;
+	if (forwardNames == 0)
+		forwardNames = (char**) malloc(sizeof(char*));
+	else
+		forwardNames = (char**) realloc(forwardNames, nForwardNames * sizeof(char*));
+	forwardNames[nForwardNames - 1] = name;
+}
+
+static void newVar(char* name, int type, char flags, int offset) {
+	Variable* var = (Variable*) malloc(sizeof(Variable));
+	var->type = type;
+	var->flags = flags;
+	var->offset = offset;
+	if (IDfind(name, (void**) IDtest) == -1) {
+		IDnew(type, strdup(name), var);
+	}
+	else
+		IDreplace(type, strdup(name), var);
+
+	if (flags & F_FORWARD)
+		addForward(strdup(name));
+}
+
+static void globalVar(Node* n) {
+	int type = LEFT_CHILD(LEFT_CHILD(n))->info;
+	int initType = RIGHT_CHILD(n)->info;
+	char flags = n->info;
+	char* name = LEFT_CHILD(RIGHT_CHILD(LEFT_CHILD(n)))->value.s;
+	int size = RIGHT_CHILD(RIGHT_CHILD(LEFT_CHILD(n)))->place;
+	newVar(name, type, F_GLOBAL | flags, 0);
+	
+	if (!(flags & F_FORWARD)) {
+		if (flags & F_PUBLIC)
+			ASM(pfGLOBL, name, pfOBJ);
+		if (initType == NIL) {
+			if (type != ARRAY)
+				ASM(pfBSS pfALIGN pfLABEL, name);
+			switch(type) {
+				case NUMBER: ASM(pfBYTE, 4); break;
+				case STRING: ASM(pfBYTE, pfWORD); break;
+				case ARRAY:
+					if (size == 0)
+						ASM(pfBSS pfALIGN pfLABEL pfBYTE, name, pfWORD);
+					else {
+						if (flags & F_CONST) ASM(pfRODATA);
+						else ASM(pfDATA);
+						lbl ++;
+						ASM(pfALIGN pfLABEL pfID pfLABEL, 
+							name, mklbl(lbl), mklbl(lbl));
+						for (int i = 0; i < size; i ++)
+							ASM(pfINTEGER, 0);
+					}
+					break;
+			}
+		}
+		else {
+			if (flags & F_CONST) ASM(pfRODATA);
+			else ASM(pfDATA);
+			ASM(pfALIGN pfLABEL, name);
+			switch(type) {
+				case NUMBER: 
+					ASM(pfINTEGER, LEFT_CHILD(RIGHT_CHILD(n))->value.i);
+					break;
+				case STRING: 
+					ASM(pfID, mklbl(++lbl)); /* pointer value */
+					if (flags & F_CONST) ASM(pfDATA pfALIGN); /* switch back to data */
+					ASM(pfLABEL, mklbl(lbl));
+					outstr(LEFT_CHILD(RIGHT_CHILD(n))->value.s); /* string value */
+					break;
+				case ARRAY:
+					ASM(pfID, mklbl(++lbl)); /* pointer value */
+					if (flags & F_CONST) ASM(pfDATA pfALIGN); /* switch back to data */
+					ASM(pfLABEL, mklbl(lbl));
+					int i = 0;
+					for (; i < currentArraySize; i ++)
+						ASM(pfINTEGER, currentArray[i]);
+					for (; i < size; i ++)
+						ASM(pfINTEGER, 0);
+					break;
+			}
+		}
+	}
+}
+
+static void newFunc(char* name, char flags) {
+	Function* func = (Function*) malloc(sizeof(Function));
+	fName = strdup(name);
+	func->name = strdup(name);
+	func->flags = flags;
+
+	if (IDfind(name, (void**) IDtest) == -1) {
+		IDnew(FUNCTION, strdup(name), func);
+	}
+	else {
+		IDreplace(FUNCTION, strdup(name), func);
+	}
+	if (flags & F_FORWARD) {
+		addForward(strdup(name));
+	}
+}
+
+static void enterFunction(Node* n) {
+	if (fName) {
+		void* data;
+		IDfind(fName, &data);
+		Function* func = (Function*) data;
+
+		ASM(pfTEXT pfALIGN pfLABEL, fName);
+	}
+	ASM(pfENTER, (int) n->place); 
+	initLocalArrays();	
+}
+
+static void setParamsSize(char* name, int size) {
+	void* data;
+	IDfind(name, &data);
+	((Function*) data)->paramsSize = size;
+}
+
+static void addExterns() {
+	for (int i = 0; i < nForwardNames; i ++) {
+		void* data;
+		if (IDfind(forwardNames[i], &data) == FUNCTION) {
+			Function* func = (Function*) data;
+			if (func->flags & F_FORWARD)
+				ASM(pfEXTRN, forwardNames[i]);
+		}
+		else {
+			Variable* var = (Variable*) data;
+			if (var->flags & F_FORWARD)
+				ASM(pfEXTRN, forwardNames[i]);
+		}
+	}
+}
+
+static char idIsGlobal(char* id, void** data) {
+	int result = IDfind(id, data);
+	if (result == FUNCTION)
+		return ((Function*) *data)->flags & F_GLOBAL;
+	else
+		return ((Variable*) *data)->flags & F_GLOBAL;
+}
+
+static void incdec(Node* idNode, Node* valueNode, char op) {
+	/* get address */
+	char* srcName = idNode->value.s;
+	Variable* srcVar;
+	if (idIsGlobal(srcName, (void**) &srcVar))
+		ASM(pfADDR, srcName);
+	else
+		ASM(pfLOCAL, srcVar->offset);
+
+	/* do operation */
+	int value = valueNode->value.i;
+	if (op == '+')
+		ASM(pfINCR, value);
+	else /* - */
+		ASM(pfDECR, value);
+}
+
+static int isNumberLeft(Node* n) {
+	return LEFT_CHILD(n)->info == NUMBER ? 1 : LARGE_INT;
+}
+
+static int isStrLeft(Node* n) {
+	return LEFT_CHILD(n)->info == STRING ? 1 : LARGE_INT;
+}
+
+static int isNilLeft(Node* n) {
+	return LEFT_CHILD(n)->info == NIL ? 1 : LARGE_INT;
+}
+
+static int isStrArrLeft(Node* n) {
+	return (LEFT_CHILD(n)->info == STRING || LEFT_CHILD(n)->info == ARRAY) ? 1 : LARGE_INT;
+}
+
+static int isStrRight(Node* n) {
+	return RIGHT_CHILD(n)->info == STRING ? 1 : LARGE_INT;
+}
+
+static int isArrRight(Node* n) {
+	return RIGHT_CHILD(n)->info == ARRAY ? 1 : LARGE_INT;
+}
+
+static int isArrAndNum(Node* n) {
+	return (LEFT_CHILD(n)->info == ARRAY && RIGHT_CHILD(n)->info == NUMBER) ? 1 : LARGE_INT;
+}
+
+static int isNumAndArr(Node* n) {
+	return (LEFT_CHILD(n)->info == NUMBER && RIGHT_CHILD(n)->info == ARRAY) ? 1 : LARGE_INT;
+}
+
+static int isArrAndArr(Node* n) {
+	return (LEFT_CHILD(n)->info == ARRAY && RIGHT_CHILD(n)->info == ARRAY) ? 1 : LARGE_INT;
+}
+
+static int isNumAndNum(Node* n) {
+	return (LEFT_CHILD(n)->info == NUMBER && RIGHT_CHILD(n)->info == NUMBER) ? 1 : LARGE_INT;
+}
+
+static int sameNameLLR(Node* n) {
+	return strcmp(LEFT_CHILD(LEFT_CHILD(n))->value.s, RIGHT_CHILD(n)->value.s) == 0 ? 1 : LARGE_INT;
+}
+
+static int sameNameRLR(Node* n) {
+	return strcmp(RIGHT_CHILD(LEFT_CHILD(n))->value.s, RIGHT_CHILD(n)->value.s) == 0 ? 1 : LARGE_INT;
+}
+
+%}
+%include "y.tab.h"
+%term ELEM=',' EXPR=';' PRINT='!' ALLOC='#'
+%term INPUT='?' INDEX='[' CALL='('
+%term ADD='+' SUB='-' POW='^' MUL='*' DIV='/' MOD='%' 
+%term LT='<' GT='>' EQ='='
+%term NOT='~' AND='&' OR='|'
+%%
+file:		PROGRAM(decls_prog, body)	1 { IDpop(); ASM(pfIMM pfPOP pfLEAVE pfRET, 0); addExterns(); }
+file:		MODULE(decls)				1 { addExterns(); }
+
+decls_prog: decls					1 { ASM(pfTEXT pfGLOBL pfALIGN pfLABEL, "_main", pfFUNC, "_main"); IDpush(); }
+
+decls:		DECLS(decls, decl)		1 {}
+decls:		NIL						1 {}
+
+decl:		F_RET(type, f_id)		1  { if (p->info == F_PUBLIC) ASM(pfGLOBL, fName, pfFUNC); fName = 0; }
+decl:		VAR(V_TYPE(type, V_ID(ID, size)), init) 1 { globalVar(p); }
+
+size:		NUMLIT	1 { p->place = p->value.i; }
+size:		NIL		1 { p->place = 0; }
+
+type:		NUMBER					1 {}
+type:		STRING					1 {}
+type:		ARRAY					1 {}
+%! only for functions
+type:		VOID					1 {}
+
+init:		INIT(NUMLIT)			1 {}
+init:		INIT(CHRLIT)			1 {}
+init:		INIT(TXTLIT)			1 {}
+init:		INIT(array)				1 {}
+init:		NIL						1 {}
+
+array:		ELEM(NIL, NUMLIT)		1 { if (currentArray) free(currentArray); currentArray = (int*) malloc(sizeof(int));
+										currentArraySize = 1; currentArray[0] = RIGHT_CHILD(p)->value.i; }
+array:		ELEM(NUMLIT, NUMLIT)	1 { if (currentArray) free(currentArray); currentArray = (int*) malloc(2 * sizeof(int)); 
+										currentArraySize = 2; currentArray[0] = LEFT_CHILD(p)->value.i; currentArray[1] = RIGHT_CHILD(p)->value.i; }
+array:		ELEM(array, NUMLIT)		1 { currentArray = (int*) realloc(currentArray, (++currentArraySize) * sizeof(int));
+										currentArray[currentArraySize - 1] = RIGHT_CHILD(p)->value.i; }
+
+f_id:		F_ID(f_id_do, F_PARAMS(params_end, DO(body)))	1 { IDpop(); ASM(pfPOP pfLEAVE pfRET); }
+f_id:		F_ID(f_id_done, F_PARAMS(params_end, DONE))		1 { IDpop(); }
+
+f_id_do: 	ID			1 { newFunc(mkfunc(p->value.s), 0); IDpush(); }
+%! forward declaration
+f_id_done:	ID			1 { newFunc(mkfunc(p->value.s), F_FORWARD); IDpush(); }
+
+params_end:	params					1 { setParamsSize(fName, p->place - 8); }
+
+params:		PARAM(params, V_TYPE(type, V_ID(ID, size)))	1 { int type = LEFT_CHILD(RIGHT_CHILD(p))->info;
+															int place = LEFT_CHILD(p)->place;
+															newVar(LEFT_CHILD(RIGHT_CHILD(RIGHT_CHILD(p)))->value.s,
+																type, 0, place);
+															p->place = place + getSize(type); }
+params:		NIL											1 { p->place = 8; }
+
+body:		BODY(vars_end, block)	1 {}
+
+vars_end:	vars					1 { enterFunction(p); }
+
+vars:		VARS(vars, V_TYPE(type, V_ID(ID, size)))	1 { int type = LEFT_CHILD(RIGHT_CHILD(p))->info;
+															p->place = LEFT_CHILD(p)->place + getSize(type);
+															int arraySize = RIGHT_CHILD(RIGHT_CHILD(RIGHT_CHILD(p)))->place;
+															if (arraySize > 0) {
+																p->place += arraySize * 4;
+																addLocalArray(-p->place);
+															}
+															newVar(LEFT_CHILD(RIGHT_CHILD(RIGHT_CHILD(p)))->value.s,
+																type, 0, -p->place); }
+vars:		NIL											1 { resetLocalArrays(); p->place = 0; }
+
+block:		BLOCK(instrs, endinstr)	1 {}
+
+instrs:		INSTR(instrs, instr)	1 {}
+instrs:		NIL						1 {}	
+
+instr:		FI(elifs, ELSE(block))	1 { ASM(pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+instr:		FI(elifs_last, NIL)		1 { ASM(pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+instr:		FOR(for_init, until)	1 { ASM(pfLABEL, forAfterLabel()); popForLabel(); }
+instr:		START_WHILE(start_while, while) 1 { ASM(pfLABEL, whileAfterLabel()); popWhileLabel(); }
+instr:		EXPR(expr)				isNumberLeft { ASM(pfTRASH, 4); }
+instr:		EXPR(expr)				isStrArrLeft { ASM(pfTRASH, pfWORD); }
+instr:		EXPR(expr)				isNilLeft {}
+instr:		PRINT(expr)				1 { printExpr(LEFT_CHILD(p)); }
+instr:		ALLOC(alloc_size_str, lval)		isStrRight { ASM(pfSTORE); }
+instr:		ALLOC(alloc_size_arr, lval)		isArrRight { ASM(pfSTORE); }
+
+alloc_size_str:		expr			1 { ASM(pfALLOC pfSP); }
+alloc_size_arr:		expr			1 { ASM(pfIMM pfMUL pfALLOC pfSP, 4); }		
+
+%! an else of elif comes after if or elif
+elifs:	IF(cond, block)					1 { p->place = ++lbl; ASM(pfJMP pfLABEL, 
+											mklbl(p->place), mklbl(LEFT_CHILD(p)->place)); }
+elifs:	ELIFS(elifs, ELIF(cond, block)) 1 { p->place = LEFT_CHILD(p)->place; ASM(pfJMP pfLABEL,
+											mklbl(p->place), mklbl(LEFT_CHILD(RIGHT_CHILD(p))->place)); }
+
+%! nothing comes after if or elif
+elifs_last: IF(cond, block)						1 { p->place = LEFT_CHILD(p)->place; }
+elifs_last: ELIFS(elifs, ELIF(cond, block))		1 { p->place = LEFT_CHILD(p)->place; ASM(pfLABEL,
+													mklbl(LEFT_CHILD(RIGHT_CHILD(p))->place)); }
+
+cond:		expr					2 { p->place = ++lbl; ASM(pfJZ, mklbl(lbl)); }
+
+for_init:	expr					1 { ASM(pfTRASH pfLABEL, getSize(p->info), mklbl(++lbl)); pushForLabels(lbl, lbl + 1, lbl + 2); lbl += 2; inCycle = IN_FOR; }
+until:		UNTIL(until_expr, step)	1 {}
+until_expr:	expr					1 { ASM(pfJNZ, forAfterLabel());}
+step:		STEP(step_block, expr)	1 { ASM(pfTRASH pfJMP, getSize(RIGHT_CHILD(p)->info), forLabel()); }
+step_block:	block					1 { ASM(pfLABEL, forIncrLabel()); }
+
+start_while: NIL						1 { ASM(pfLABEL, mklbl(++lbl)); pushWhileLabels(lbl, lbl + 1); ++lbl; }
+while:		WHILE(while_cond, block)	1 { ASM(pfJMP, whileLabel()); }
+while_cond: expr						1 { ASM(pfJZ, whileAfterLabel()); inCycle = IN_WHILE; }
+
+endinstr:	REPEAT					1 { ASM(pfJMP, inCycle == IN_FOR ? forIncrLabel() : whileLabel()); }
+endinstr:	STOP					1 { ASM(pfJMP, inCycle == IN_FOR ? forAfterLabel() : whileAfterLabel()); }
+endinstr:	RETURN(NIL)				1 { ASM(pfPOP pfLEAVE pfRET); }
+endinstr:	RETURN(expr)			1 { ASM(pfPOP pfLEAVE pfRET); }
+endinstr:	NIL						1 {}
+
+lval:		ID						1 { parseID(p, 0); }
+lval:		INDEX(id_idx, expr)		1 { parseIndex(p); }
+
+id_idx:		ID						1 { parseID(p, 1); }
+
+expr:		INDEX(id_idx, expr)		1 { loadIndex(p); }
+expr:		ID						1 { loadID(p); }
+expr:		NUMLIT					1 { ASM(pfIMM, p->value.i); }
+expr:		CHRLIT					1 { ASM(pfIMM, p->value.i); }
+expr:		TXTLIT					1 { lbl++; ASM(pfRODATA pfALIGN pfLABEL, mklbl(lbl)); outstr(p->value.s); ASM(pfTEXT pfADDR, mklbl(lbl));}
+expr:		INPUT					1 { ASM(pfEXTRN pfCALL pfPUSH, "_readi", "_readi"); }
+expr:		CALL(ID, args)			1 { char* funcName = mkfunc(LEFT_CHILD(p)->value.s); ASM(pfCALL, funcName);
+										void* data; IDfind(funcName, &data); Function* f = (Function*) data;
+										if (f->paramsSize > 0) ASM(pfTRASH, f->paramsSize);
+										if (f->retType != NIL) ASM(pfPUSH); }
+expr:		ADDR(lval)				1 {}
+expr:		UMINUS(expr)			1 { ASM(pfNEG); }
+expr:		POW(expr, expr)			1 { ASM(pfEXTRN pfCALL pfTRASH pfPUSH, "_pow", "_pow", 8); }
+expr:		MUL(expr, expr)			1 { ASM(pfMUL); }
+expr:		DIV(expr, expr)			1 { ASM(pfDIV); }
+expr:		MOD(expr, expr)			1 { ASM(pfMOD); }
+
+expr:		ADD(expr, expr)			isNumAndNum { ASM(pfADD); }
+expr:		ADD(exprX4, expr)		isNumAndArr { ASM(pfADD); }
+expr:		ADD(expr, exprX4)		isArrAndNum { ASM(pfADD); }
+
+expr:		SUB(expr, expr)			isNumAndNum { ASM(pfSUB); }
+expr:		SUB(exprX4, expr)		isNumAndArr { ASM(pfSUB); }
+expr:		SUB(expr, exprX4)		isArrAndNum { ASM(pfSUB); }
+expr:		SUB(expr, expr)			isArrAndArr { ASM(pfSUB pfIMM pfDIV, 4); }
+
+exprX4:		expr					{ ASM(pfIMM pfMUL, 4); }
+
+expr:		LT(expr, expr)			isNumberLeft {ASM(pfLT);}
+expr:		GT(expr, expr)			isNumberLeft {ASM(pfGT);}
+expr:		LEQ(expr, expr)			isNumberLeft {ASM(pfLE);}
+expr:		GEQ(expr, expr)			isNumberLeft {ASM(pfGE);}
+expr:		EQ(expr, expr)			isNumberLeft {ASM(pfEQ);}
+expr:		NEQ(expr, expr)			isNumberLeft {ASM(pfNE);}
+expr:		XOR(expr, expr)			isNumberLeft {ASM(pfXOR);}
+
+expr:		LT(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfLT, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+expr:		GT(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfGT, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+expr:		LEQ(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfLE, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+expr:		GEQ(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfGE, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+expr:		EQ(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfEQ, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+expr:		NEQ(expr, expr)			isStrLeft {ASM(pfEXTRN pfCALL pfTRASH pfPUSH pfIMM pfNE, "_strcmp", "_strcmp", 2 * pfWORD, 0);}
+
+expr:		NOT(expr)				1 { ASM(pfIMM pfEQ, 0); }
+expr:		AND(and, expr)			1 { ASM(pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+expr:		OR(or, expr)			1 { ASM(pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+
+expr:		ASSIGN(assign_value, INDEX(id_idx, expr))	1 { parseIndex(RIGHT_CHILD(p)); 
+															storeIndex(LEFT_CHILD(RIGHT_CHILD(p))); }
+expr:		ASSIGN(assign_value, lval)					3 { ASM(pfSTORE); }
+
+
+assign_value : expr					1 { ASM(pfDUP); }			
+
+and:		expr					1 { p->place = ++lbl; ASM(pfDUP pfJZ pfTRASH, mklbl(lbl), pfWORD); }
+or:			expr					1 { p->place = ++lbl; ASM(pfDUP pfJNZ pfTRASH, mklbl(lbl), pfWORD); }
+
+args:		ARG(expr, args)			1 {}
+args:		NIL						1 {}
+
+%! optimizations
+num:		NUMLIT					0 {}
+num:		CHRLIT					0 {}
+
+expr:		ASSIGN(ID, ID)			1 { loadID(LEFT_CHILD(p)); ASM(pfDUP); storeID(RIGHT_CHILD(p)); /* x := y */ } 
+expr:		ASSIGN(expr, ID)		2 { ASM(pfDUP); storeID(RIGHT_CHILD(p)); /* x := 19 */ }
+
+%! increments and decrements
+instr: 		incdecInstr				1 {}
+incdecInstr:	ASSIGN(ADD(ID, num), ID) sameNameLLR { incdec(RIGHT_CHILD(p), LEFT_CHILD(LEFT_CHILD(p)), '+'); }
+incdecInstr:	ASSIGN(ADD(num, ID), ID) sameNameRLR { incdec(RIGHT_CHILD(p), RIGHT_CHILD(LEFT_CHILD(p)), '+'); }		
+incdecInstr:	ASSIGN(SUB(ID, num), ID) sameNameLLR { incdec(RIGHT_CHILD(p), LEFT_CHILD(LEFT_CHILD(p)), '-'); }
+incdecInstr:	ASSIGN(SUB(num, ID), ID) sameNameRLR { incdec(RIGHT_CHILD(p), RIGHT_CHILD(LEFT_CHILD(p)), '-'); }
+
+%! if (comparation)
+cond:		LT(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJGE, mklbl(lbl)); }
+cond:		GT(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJLE, mklbl(lbl)); }
+cond:		LEQ(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJGT, mklbl(lbl)); }
+cond:		GEQ(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJLT, mklbl(lbl)); }
+cond:		EQ(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJNE, mklbl(lbl)); }
+cond:		NEQ(expr, expr)					isNumberLeft { p->place = ++lbl; ASM(pfJEQ, mklbl(lbl)); }
+
+%! constant folding
+expr:	numConst		1 { p->info = NUMBER; ASM(pfIMM, (int) p->place); }
+numConst:	num			0 { p->place = p->value.i; }
+
+numConst:	UMINUS(numConst)		0 { p->place = -LEFT_CHILD(p)->place; }
+numConst:	POW(numConst, numConst) 0 { p->place = power(LEFT_CHILD(p)->place, RIGHT_CHILD(p)->place); }
+numConst:	MUL(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place * RIGHT_CHILD(p)->place; }
+numConst:	DIV(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place / RIGHT_CHILD(p)->place; }
+numConst:	MOD(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place % RIGHT_CHILD(p)->place; }
+numConst:	ADD(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place + RIGHT_CHILD(p)->place; }
+numConst:	LT(numConst, numConst) 	0 { p->place = LEFT_CHILD(p)->place < RIGHT_CHILD(p)->place; }
+numConst:	GT(numConst, numConst) 	0 { p->place = LEFT_CHILD(p)->place > RIGHT_CHILD(p)->place; }
+numConst:	LEQ(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place <= RIGHT_CHILD(p)->place; }
+numConst:	GEQ(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place >= RIGHT_CHILD(p)->place; }
+numConst:	EQ(numConst, numConst) 	0 { p->place = LEFT_CHILD(p)->place == RIGHT_CHILD(p)->place; }
+numConst:	NOT(numConst) 			0 { p->place = !LEFT_CHILD(p)->place; }
+numConst:	AND(numConst, numConst) 0 { p->place = LEFT_CHILD(p)->place && RIGHT_CHILD(p)->place; }
+numConst:	OR(numConst, numConst) 	0 { p->place = LEFT_CHILD(p)->place || RIGHT_CHILD(p)->place; }
+
+numConst: 	LT(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) < 0; }
+numConst:	GT(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) > 0; }
+numConst:	LEQ(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) <= 0; }
+numConst:	GEQ(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) >= 0; }
+numConst:	EQ(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) == 0; }
+numConst:	NEQ(CHRLIT, CHRLIT)		0 { p->place = strcmp(LEFT_CHILD(p)->value.s, RIGHT_CHILD(p)->value.s) != 0; }
+%%
+
+extern int trace, errors, debugNode;
+void evaluate(Node *p) {
+	if (errors) return;
+	if (trace) printNode(p, stdout, yynames);
+	if (!yyselect(p) && trace) printf("selection successful\n");
+}
+
+#ifndef NOTRACE
+static void yytrace(NODEPTR_TYPE p, int eruleno, int cost, int bestcost)
+{
+	int op = OP_LABEL(p);
+	YYCONST char *tname = yytermname[op] ? yytermname[op] : "?";
+	if (debugNode) fprintf(stderr, "0x%p:%s matched %s with cost %d vs. %d\n", p, tname, yystring[eruleno], cost, bestcost);
+	if (cost >= MAX_COST && bestcost >= MAX_COST) {
+		fprintf(stderr, "0x%p:%s NO MATCH %s with cost %d vs. %d\n", p, tname, yystring[eruleno], cost, bestcost);
+		printNode(p, stderr, yynames);
+	}
+}
+#endif

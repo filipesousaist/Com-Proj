@@ -1,0 +1,6 @@
+program
+    string s;
+    function forward number s string str; array arr done
+start
+
+end

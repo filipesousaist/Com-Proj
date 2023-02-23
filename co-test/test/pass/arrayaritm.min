@@ -1,0 +1,9 @@
+program
+    array x
+start
+    x - x ! $$ Should be zero
+    3 - x !
+    x - 3 !
+    x + 3 !
+    3 + x !
+end

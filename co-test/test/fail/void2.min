@@ -1,0 +1,8 @@
+program
+    number x := 123;
+    function void test do 123;
+start
+    for x until test step x do
+        "what?" !
+    done
+end

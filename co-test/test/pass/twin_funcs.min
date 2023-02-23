@@ -1,0 +1,20 @@
+program
+    function forward number b number arg done;
+
+    function number a number arg do
+        if arg > 0 then
+            return b(arg - 1)
+        fi
+        return 'A'
+    ;
+    function number b number arg do
+        if arg > 0 then
+            return a(arg - 1)
+        fi
+        return 'B'
+start
+    a(1)!   $$ 66
+    a(10)!  $$ 65
+    b(-3)!  $$ 66
+    b(14)!  $$ 66
+end

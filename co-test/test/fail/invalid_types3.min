@@ -1,0 +1,4 @@
+program
+    string x := 123
+start
+end

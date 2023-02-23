@@ -1,0 +1,4 @@
+program
+    array vector[10][10]
+start
+end

@@ -1,0 +1,4 @@
+program
+start
+  '\"'!  $$ Should Fail because '"' is valid
+end

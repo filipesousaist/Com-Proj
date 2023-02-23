@@ -1,0 +1,9 @@
+program
+    function void hello do 123!
+start
+    if 0 = 0 then
+        0!
+    elif hello then
+        1!
+    fi
+end   

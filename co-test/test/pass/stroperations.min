@@ -1,0 +1,13 @@
+program
+    string x := "defg";
+    string y := "abcd"
+start
+    $ Comparison $
+    x < y  ! "\n"!   $$ 0
+    x > y  ! "\n"!   $$ non-zero
+    x <= y ! "\n"!   $$ 0
+    x >= y ! "\n"!   $$ non-zero
+    x = y  ! "\n"!   $$ 0
+    x ~= y ! "\n"!   $$ non-zero
+    "End"!
+end

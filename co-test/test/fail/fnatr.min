@@ -1,0 +1,5 @@
+program
+    function number x do return 3
+start
+    x := 4;
+end

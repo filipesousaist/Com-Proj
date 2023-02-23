@@ -1,0 +1,28 @@
+program
+    number x := 5;
+    number y := 3
+start
+    $ Arithmetic $
+    x + y !  "\n"!   $$ 8
+    x - y !  "\n"!   $$ 2
+    x * y !  "\n"!   $$ 15
+    x / y !  "\n"!   $$ 1
+    - x   !  "\n"!   $$ -5
+    x % y !  "\n"!   $$ 2
+    x ^ y !  "\n"!   $$ 125
+
+    $ Logical $
+    x & y !  "\n"!   $$ non-zero
+    x | y !  "\n"!   $$ non-zero
+    ~ x   !  "\n"!   $$ 0
+
+    $ Comparison $
+    x < y  ! "\n"!   $$ 0
+    x > y  ! "\n"!   $$ non-zero
+    x <= y ! "\n"!   $$ 0
+    x >= y ! "\n"!   $$ non-zero
+    x = y  ! "\n"!   $$ 0
+    x ~= y ! "\n"!   $$ non-zero
+
+    "End"!
+end

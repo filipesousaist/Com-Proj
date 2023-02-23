@@ -1,0 +1,10 @@
+program
+    string x := "Hello!";
+
+    function void goodbye do 
+        string x;
+        x := "Goodbye!" !
+start
+    x!
+    goodbye;
+end

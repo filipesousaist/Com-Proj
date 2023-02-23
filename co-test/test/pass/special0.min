@@ -1,0 +1,8 @@
+program
+    array x;
+    string y
+start
+    x := 0;
+    y := 0;
+end
+

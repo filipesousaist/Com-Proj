@@ -1,0 +1,6 @@
+program
+    function forward number sum number x; number y done;
+    function number sum number x; string y do
+        return x
+start
+end

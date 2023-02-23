@@ -1,0 +1,6 @@
+program
+    string x := "defg";
+    number y := 123
+start
+    x ~= y  !
+end

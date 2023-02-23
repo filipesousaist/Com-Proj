@@ -1,0 +1,10 @@
+*** Neste caso, como é declarada a dimensão do array (1), o valor 0
+*** representa o conteúdo do array, e não o ponteiro, ao contrário           
+*** do caso do programa "special0.min", em que não é indicada a
+*** dimensão, e por isso o valor 0 representa um ponteiro nulo.
+
+program
+	array a[1] := 0 
+start               
+	a[1]!
+end

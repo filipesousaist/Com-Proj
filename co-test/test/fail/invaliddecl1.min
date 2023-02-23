@@ -1,0 +1,5 @@
+program
+    function forward number favorite done;
+    function string favorite do return "42"
+start
+end

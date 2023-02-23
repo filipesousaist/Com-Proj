@@ -1,0 +1,7 @@
+program
+    string x := "abc"
+start
+    number x;
+    x := 78;
+    x + x !
+end

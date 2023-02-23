@@ -1,0 +1,4 @@
+program
+    string s := 97 98 99 0 $$ É possível em declarações?
+start
+end

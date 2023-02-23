@@ -1,0 +1,7 @@
+program
+    function number hello number a do
+        number a;
+        return a
+start
+
+end

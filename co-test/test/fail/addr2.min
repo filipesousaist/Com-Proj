@@ -1,0 +1,5 @@
+program
+    string y := "hello"
+start
+    &y!
+end

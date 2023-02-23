@@ -1,0 +1,3 @@
+program start
+    143 or 266! "\n"!
+end

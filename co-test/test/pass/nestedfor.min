@@ -1,0 +1,11 @@
+program
+    number x;
+    number y
+start
+    for x := 0 until x = 30 step x := x + 1 do
+        for x := 0 until x = 30 step x := x + 1 do
+            stop
+        done
+        stop
+    done
+end        

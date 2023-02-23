@@ -1,0 +1,6 @@
+*.asm
+*.out
+*.o
+myret
+myout
+diff

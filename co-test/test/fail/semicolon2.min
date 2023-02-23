@@ -1,0 +1,5 @@
+program
+    $$ Semicolon not allowed after last argument
+    function void f number x; number y; done
+start
+end

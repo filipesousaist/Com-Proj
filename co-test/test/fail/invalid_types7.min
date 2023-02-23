@@ -1,0 +1,5 @@
+program
+    function string hello do
+        return 3 > 2
+start
+end

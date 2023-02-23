@@ -1,0 +1,5 @@
+program
+    string x := "hello
+            life"
+start
+end

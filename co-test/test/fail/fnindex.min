@@ -1,0 +1,7 @@
+program
+    number y := 42;
+    function array pointer_to_y number x do
+        return &y
+start
+    pointer_to_y[0]!
+end

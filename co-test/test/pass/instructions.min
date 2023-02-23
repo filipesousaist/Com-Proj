@@ -1,0 +1,41 @@
+program
+    number x;
+    string s;
+    function void hello do 
+        "Hello" 10 !
+        if x >= 100 then
+            "Large number" 10 !
+        else 
+            return
+        fi
+        x := 99;
+start
+    number i;
+
+    x := ?;
+
+    hello;
+
+    if x > 5 then
+        "Larger than 5"! "\n"!
+    elif x <= 0 then
+        "Non-positive"! "\n"!
+    else
+        "Between 1 and 5"! "\n"!
+    fi
+
+    s # x;
+
+    for i := 1 until i > x step i := i + 1 do
+        s[i - 1] := ?;
+        if (s[i - 1] ^ 2 - s[i - 1]) / 2 % 2 then
+            repeat
+        fi
+        "Ending loop abruptly"! "\n"!
+        stop
+    done
+
+    if i < 3 then
+        return 1
+    fi
+end

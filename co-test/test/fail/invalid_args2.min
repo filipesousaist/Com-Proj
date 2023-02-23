@@ -1,0 +1,5 @@
+program
+    function forward number x number y; number z done
+start
+   x(3) ; 
+end

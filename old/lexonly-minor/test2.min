@@ -1,0 +1,6 @@
+program
+	number module := 1
+start
+module!
+end
+

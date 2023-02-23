@@ -1,0 +1,58 @@
+%{
+/*
+ * selecção de instruções com postfix
+ */
+#include <stdio.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+#include "node.h"
+#include "postfix.h"
+#include "y.tab.h"
+#include "minor.h"
+
+#ifndef U_
+#define U_ "_"
+#endif
+
+#define TRACE
+static void yytrace(NODEPTR_TYPE p, int eruleno, int cost, int bestcost);
+
+extern FILE *yyout;
+static char *mklbl(int n) {
+	static char buf[20];
+	sprintf(buf, "%cL%d", n < 0 ? '.' : '_', n);
+	return strcpy(malloc(strlen(buf)+1),buf);
+}
+static char *mkfunc(char *s) {
+	static char buf[80];
+	strcpy(buf, "_");
+	strcat(buf, s);
+	return buf;
+}
+%}
+%term STMT=';'
+%include "y.tab.h"
+%%
+file: PROGRAM
+%%
+extern char **yynames;
+extern int trace, errors, debugNode;
+void evaluate(Node *p) {
+	if (errors) return;
+	/* if (trace) */ printNode(p, stdout, yynames);
+	if (!yyselect(p) && trace) printf("selection successful\n");
+}
+
+#ifndef NOTRACE
+static void yytrace(NODEPTR_TYPE p, int eruleno, int cost, int bestcost)
+{
+	int op = OP_LABEL(p);
+	YYCONST char *tname = yytermname[op] ? yytermname[op] : "?";
+	if (debugNode) fprintf(stderr, "0x%p:%s matched %s with cost %d vs. %d\n", p, tname, yystring[eruleno], cost, bestcost);
+	if (cost >= MAX_COST && bestcost >= MAX_COST) {
+		fprintf(stderr, "0x%p:%s NO MATCH %s with cost %d vs. %d\n", p, tname, yystring[eruleno], cost, bestcost);
+		printNode(p, stderr, yynames);
+	}
+}
+#endif

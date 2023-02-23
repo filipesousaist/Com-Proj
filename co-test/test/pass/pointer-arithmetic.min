@@ -1,0 +1,10 @@
+program
+    array x[3] := 1, 2, 3;
+    number g;
+    array y
+start
+   x + 1;
+   y := (x + 1) -  2; 
+   g := y - x;
+end
+

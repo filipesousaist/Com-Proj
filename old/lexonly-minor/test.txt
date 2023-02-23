@@ -1,0 +1,4 @@
+program start
+    "\tabc\n" !
+    "\1234\3412" !
+end

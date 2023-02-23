@@ -1,0 +1,5 @@
+program start
+    array a;
+    string s;
+    a := (s := 0); $$ (s := 0) is of type string
+end

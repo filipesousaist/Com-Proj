@@ -1,0 +1,7 @@
+module
+	function public number factorial number x; number print do
+		x! " "! print! "\n"!
+		if x = 1 | x = 0 then return 1
+		else return x * factorial(x - 1, print)
+		fi
+end

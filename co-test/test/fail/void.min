@@ -1,0 +1,7 @@
+program
+    function void test do 123;
+start
+    if test then
+        "what?" !
+    fi
+end

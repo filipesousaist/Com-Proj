@@ -1,0 +1,5 @@
+program
+    function void hello do return;
+    function void stuff do return hello
+start
+end

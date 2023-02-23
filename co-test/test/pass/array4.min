@@ -1,0 +1,5 @@
+program
+start
+    array x[30];
+    x[0] := 3;
+end

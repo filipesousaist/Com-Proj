@@ -1,0 +1,5 @@
+program
+    const number x := 3
+start
+    x := 10;
+end
